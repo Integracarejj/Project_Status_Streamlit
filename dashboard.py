@@ -5,7 +5,7 @@ import altair as alt
 from datetime import datetime
 
 # === Config ===
-INPUT_FILE = "Planner_Excel/Planner_Export.xlsx"
+INPUT_FILE = "Planner_Export.xlsx"
 DEPT_COL = "Department"
 PERCENT_COL = "% complete"
 SUMMARY_COL = "SummaryT"
