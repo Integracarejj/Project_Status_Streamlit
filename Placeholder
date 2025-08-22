@@ -1,0 +1,97 @@
+import pandas as pd
+import streamlit as st
+import matplotlib.pyplot as plt
+import altair as alt
+
+# === Config ===
+INPUT_FILE = r"C:\Users\JeremyJoyner\Documents\Planner_Export.xlsx"
+DEPT_COL = "Department"
+PERCENT_COL = "% complete"
+SUMMARY_COL = "SummaryT"
+
+status_order = ["Not Started", "In Progress", "Completed"]
+colors = ["#FF6F61", "#6BAED6", "#60BD68"]
+
+# === Load Excel ===
+df = pd.read_excel(INPUT_FILE, header=8)
+df[PERCENT_COL] = df[PERCENT_COL] * 100
+
+# === Filter summary tasks ===
+df_summary = df[df[SUMMARY_COL].astype(str).str.lower() == "yes"]
+df_summary[DEPT_COL] = df_summary[DEPT_COL].str.strip()
+
+# === Status column ===
+def status_from_percent(pct):
+    if pd.isna(pct) or pct == 0:
+        return "Not Started"
+    elif 0 < pct < 100:
+        return "In Progress"
+    elif pct == 100:
+        return "Completed"
+    return "Unknown"
+
+df_summary["Status"] = df_summary[PERCENT_COL].apply(status_from_percent)
+
+# === Group report ===
+report = df_summary.groupby([DEPT_COL, "Status"]).size().unstack(fill_value=0)
+report = report.reindex(columns=status_order, fill_value=0)
+report["Total"] = report.sum(axis=1)
+
+# === Streamlit UI ===
+st.markdown("<h1 style='text-align: center; font-weight: bold;'>Department Progress Dashboard</h1>", unsafe_allow_html=True)
+
+# KPI cards
+totals = df_summary["Status"].value_counts().reindex(status_order, fill_value=0)
+total_tasks = totals.sum()
+
+# Use columns with containers and flexbox for proper alignment
+kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+kpi_style = """
+    display: flex; 
+    flex-direction: column; 
+    justify-content: center; 
+    align-items: center; 
+    padding: 20px;
+    text-align: center;
+"""
+
+kpi1.markdown(f"<div style='{kpi_style} background-color:#F5F5F5;'><h3>Total Tasks</h3><h2>{total_tasks}</h2></div>", unsafe_allow_html=True)
+kpi2.markdown(f"<div style='{kpi_style} background-color:#FFE5E0;'><h3>Not Started</h3><h2>{totals['Not Started']}</h2></div>", unsafe_allow_html=True)
+kpi3.markdown(f"<div style='{kpi_style} background-color:#DDEBF7;'><h3>In Progress</h3><h2>{totals['In Progress']}</h2></div>", unsafe_allow_html=True)
+kpi4.markdown(f"<div style='{kpi_style} background-color:#D7EED9;'><h3>Completed</h3><h2>{totals['Completed']}</h2></div>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# === Pie Chart Section ===
+st.subheader("Overall Status Distribution")
+fig, ax = plt.subplots(figsize=(5,5))
+ax.pie(totals, labels=totals.index, autopct="%1.1f%%", startangle=90, colors=colors)
+ax.axis("equal")
+st.pyplot(fig)
+
+st.markdown("---")
+
+# === Bar Chart Section ===
+st.subheader("Bar Chart by Department")
+departments_bar = st.multiselect("Filter Departments for Bar Chart", df_summary[DEPT_COL].dropna().unique())
+filtered_bar = report if not departments_bar else report.loc[report.index.isin(departments_bar)]
+
+filtered_reset = filtered_bar.reset_index().melt(id_vars=DEPT_COL, value_vars=status_order)
+color_scale = alt.Scale(domain=status_order, range=colors)
+
+bar_chart = alt.Chart(filtered_reset).mark_bar().encode(
+    x=DEPT_COL,
+    y='value:Q',
+    color=alt.Color('Status:N', scale=color_scale),
+    tooltip=['Department', 'Status', 'value']
+).properties(width=800, height=400)
+
+st.altair_chart(bar_chart, use_container_width=True)
+
+st.markdown("---")
+
+# === Table Section ===
+st.subheader("Summary Tasks Table")
+departments_table = st.multiselect("Filter Departments for Table", report.index.tolist(), key="table_filter")
+filtered_table = report if not departments_table else report.loc[report.index.isin(departments_table)]
+st.dataframe(filtered_table, use_container_width=True)

@@ -1,0 +1,207 @@
+import pandas as pd
+import streamlit as st
+import matplotlib.pyplot as plt
+import altair as alt
+from datetime import datetime
+
+# === Config ===
+INPUT_FILE = r"C:\Users\JeremyJoyner\Documents\Planner_Export.xlsx"
+DEPT_COL = "Department"
+PERCENT_COL = "% complete"
+SUMMARY_COL = "SummaryT"
+
+status_order = ["Not Started", "In Progress", "Completed"]
+colors = ["#FF6F61", "#6BAED6", "#60BD68"]
+
+# === Load Excel ===
+df = pd.read_excel(INPUT_FILE, header=8)
+df[PERCENT_COL] = df[PERCENT_COL] * 100
+
+# === Filter summary tasks ===
+df_summary = df[df[SUMMARY_COL].astype(str).str.lower() == "yes"]
+df_summary[DEPT_COL] = df_summary[DEPT_COL].str.strip()
+
+# === Status column ===
+def status_from_percent(pct):
+    if pd.isna(pct) or pct == 0:
+        return "Not Started"
+    elif 0 < pct < 100:
+        return "In Progress"
+    elif pct == 100:
+        return "Completed"
+    return "Unknown"
+
+df_summary["Status"] = df_summary[PERCENT_COL].apply(status_from_percent)
+
+# === Totals for pie chart ===
+full_totals = df_summary["Status"].value_counts().reindex(status_order, fill_value=0)
+
+# --- Sticky Gradient Dashboard Title ---
+st.markdown("""
+<style>
+.sticky-title {
+    position: sticky;
+    top: 0;
+    background: linear-gradient(90deg, #4A90E2, #50E3C2);
+    color: white;
+    padding: 20px 0;
+    text-align: center;
+    font-size: 36px;
+    font-weight: bold;
+    z-index: 999;
+    box-shadow: 0px 2px 6px rgba(0,0,0,0.2);
+}
+</style>
+<div class='sticky-title'>Project Progress Report</div>
+""", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# --- KPI Cards ---
+totals = df_summary["Status"].value_counts().reindex(status_order, fill_value=0)
+total_tasks = totals.sum()
+
+kpi1, kpi2, kpi3, kpi4 = st.columns([1.5,1.2,1.2,1.5])
+
+# KPI styling
+kpi_style = """
+.kpi-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 25px;
+    text-align: center;
+    height: 150px;
+    border-radius: 12px;
+    box-shadow: 2px 4px 14px rgba(0,0,0,0.2);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.kpi-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 4px 8px 20px rgba(0,0,0,0.25);
+}
+"""
+st.markdown(f"<style>{kpi_style}</style>", unsafe_allow_html=True)
+
+title_style = "margin: 0; font-size: 18px; text-align: center;"
+value_style = "margin: 5px 0 0 0; font-size: 34px; font-weight: bold; text-align:center;"
+
+icons = {
+    "Total": "📋",
+    "Not Started": "⏳",
+    "In Progress": "🚧",
+    "Completed": "✅"
+}
+
+kpi1.markdown(f"<div class='kpi-card' style='background-color:#F5F5F5;'><h3 style='{title_style}'>{icons['Total']} Total Tasks</h3><h2 style='{value_style}'>{total_tasks}</h2></div>", unsafe_allow_html=True)
+kpi2.markdown(f"<div class='kpi-card' style='background-color:#FFE5E0;'><h3 style='{title_style}'>{icons['Not Started']} Not Started</h3><h2 style='{value_style}'>{totals['Not Started']}</h2></div>", unsafe_allow_html=True)
+kpi3.markdown(f"<div class='kpi-card' style='background-color:#DDEBF7;'><h3 style='{title_style}'>{icons['In Progress']} In Progress</h3><h2 style='{value_style}'>{totals['In Progress']}</h2></div>", unsafe_allow_html=True)
+kpi4.markdown(f"<div class='kpi-card' style='background-color:#D7EED9;'><h3 style='{title_style}'>{icons['Completed']} Completed</h3><h2 style='{value_style}'>{totals['Completed']}</h2></div>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# --- Pie Chart Section ---
+st.subheader("Project % Status")
+fig, ax = plt.subplots(figsize=(6,6))
+ax.pie(
+    full_totals,
+    labels=status_order,
+    autopct=lambda pct: f"{int(round(pct))}%",
+    startangle=90,
+    colors=colors,
+    textprops={'fontsize':14}
+)
+ax.axis("equal")
+st.pyplot(fig)
+
+st.markdown("---")
+
+# --- Bar Chart Section ---
+st.subheader("Task Count by Department")
+
+bar_filter = st.multiselect(
+    "Filter Departments for Bar Chart",
+    options=df_summary[DEPT_COL].dropna().unique(),
+    default=[],
+    help="Select one or more departments to filter the bar chart."
+)
+
+if len(bar_filter) > 0:
+    filtered_bar_df = df_summary[df_summary[DEPT_COL].isin(bar_filter)]
+else:
+    filtered_bar_df = df_summary.copy()
+
+report_bar = filtered_bar_df.groupby([DEPT_COL, "Status"]).size().unstack(fill_value=0)
+report_bar = report_bar.reindex(columns=status_order, fill_value=0)
+report_bar["Total"] = report_bar.sum(axis=1)
+
+bar_reset = report_bar.reset_index().melt(id_vars=DEPT_COL, value_vars=status_order)
+color_scale = alt.Scale(domain=status_order, range=colors)
+
+bar_chart = alt.Chart(bar_reset).mark_bar().encode(
+    x=DEPT_COL,
+    y=alt.Y('value:Q', title='Task Count'),
+    color=alt.Color('Status:N', scale=color_scale),
+    tooltip=['Department', 'Status', 'value']
+).properties(width=950, height=420)
+
+st.altair_chart(bar_chart, use_container_width=True)
+
+# --- Progress by Department Table Section ---
+st.subheader("Progress by Department")
+
+table_filter = st.multiselect(
+    "Filter Departments for Table",
+    options=df_summary[DEPT_COL].dropna().unique(),
+    default=[],
+    help="Select one or more departments to filter the table."
+)
+
+if len(table_filter) > 0:
+    filtered_table_df = df_summary[df_summary[DEPT_COL].isin(table_filter)]
+else:
+    filtered_table_df = df_summary.copy()
+
+report_table = filtered_table_df.groupby([DEPT_COL, "Status"]).size().unstack(fill_value=0)
+report_table = report_table.reindex(columns=status_order, fill_value=0)
+report_table["Total"] = report_table.sum(axis=1)
+report_table.reset_index(inplace=True)
+
+# Mini progress bars as percentage of total tasks
+report_table["Progress"] = ((report_table["Completed"] / report_table["Total"]) * 100).round().astype(int)
+
+# Render HTML table with left-aligned Department and mini progress bars
+def render_html_table(df):
+    html = "<table style='border-collapse: collapse; width: 100%;'>"
+    # Headers
+    html += "<thead><tr>"
+    for col in df.columns:
+        html += f"<th style='border: 1px solid #ccc; padding: 8px; text-align:center; font-weight:bold; background-color:#f0f0f0;'>{col}</th>"
+    html += "</tr></thead>"
+    # Rows
+    html += "<tbody>"
+    for i, row in df.iterrows():
+        bg_color = "#f5faff" if i % 2 == 0 else "white"
+        html += f"<tr style='background-color:{bg_color};'>"
+        for col in df.columns:
+            if col == DEPT_COL:
+                html += f"<td style='border: 1px solid #ccc; padding: 8px; text-align:left;'>{row[col]}</td>"
+            elif col == "Progress":
+                html += f"<td style='border: 1px solid #ccc; padding: 4px 8px; text-align:center;'>"
+                html += f"<div style='background-color:#ddd; border-radius:10px; width:100%; height:16px;'><div style='background-color:#60BD68; width:{row[col]}%; height:16px; border-radius:10px;'></div></div>"
+                html += f"{row[col]}%</td>"
+            else:
+                html += f"<td style='border: 1px solid #ccc; padding: 8px; text-align:center;'>{row[col]}</td>"
+        html += "</tr>"
+    html += "</tbody></table>"
+    return html
+
+st.markdown(render_html_table(report_table), unsafe_allow_html=True)
+
+# CSV download
+csv = report_table.to_csv(index=False).encode('utf-8')
+st.download_button("Download Table CSV", data=csv, file_name="progress_by_department.csv", mime="text/csv")
+
+st.markdown("---")
+st.markdown(f"<div style='text-align:center; color:gray;'>Report generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
